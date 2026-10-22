@@ -63,6 +63,8 @@ class FakePage:
     async def evaluate(self, script, args):
         self.script = script
         self.args = args
+        if "selfProfileUrl" in args:
+            return {"status_code": 0, "user": {"sec_uid": "self-synthetic-id"}}
         return {"ok": True, "cursor": 0, "has_more": False, "items": []}
 
 
@@ -156,9 +158,57 @@ class BrowserCollectorTests(unittest.TestCase):
         self.assertEqual(page.args["apiUrl"], browser_collector.LIKES_API_URL)
         self.assertEqual(page.args["source"], "like")
         self.assertIn("sec_user_id", page.script)
-        self.assertIn('([^\"]+)', page.script)
-        self.assertNotIn('([^"\\\\]+)', page.script)
-        self.assertIn(".join('\\n')", page.script)
+        self.assertEqual(page.args["secUserId"], "self-synthetic-id")
+        self.assertNotIn("document.scripts", page.script)
+
+    def test_like_self_identity_fails_closed_for_non_self_payload(self):
+        class NonSelfPage(FakePage):
+            async def evaluate(self, script, args):
+                if "selfProfileUrl" in args:
+                    return {"status_code": 0, "author": {"sec_uid": "someone-else"}}
+                raise AssertionError("likes must not be fetched without a verified self identity")
+
+        collector = browser_collector.BrowserCollector(source="like")
+        collector._page = NonSelfPage()
+        result = asyncio.run(collector.fetch_page(cursor=0, count=3))
+        self.assertEqual(result, {"ok": False, "error": "self_identity_unavailable"})
+
+    def test_like_self_identity_rejects_failure_even_with_user_field(self):
+        class FailedSelfPage(FakePage):
+            async def evaluate(self, script, args):
+                if "selfProfileUrl" in args:
+                    return {"status_code": 8, "user": {"sec_uid": "someone-else"}}
+                raise AssertionError("likes must not be fetched after a failed self response")
+
+        collector = browser_collector.BrowserCollector(source="like")
+        collector._page = FailedSelfPage()
+        result = asyncio.run(collector.fetch_page(cursor=0, count=3))
+        self.assertEqual(result, {"ok": False, "error": "self_identity_unavailable"})
+
+    def test_like_self_identity_rejects_empty_or_malformed_id(self):
+        for identity in (None, "", "bad?query=value", 123):
+            class EmptySelfPage(FakePage):
+                async def evaluate(self, script, args):
+                    if "selfProfileUrl" in args:
+                        return {"status_code": 0, "user": {"sec_uid": identity}}
+                    raise AssertionError("likes must not be fetched without a valid self identity")
+
+            with self.subTest(identity=identity):
+                collector = browser_collector.BrowserCollector(source="like")
+                collector._page = EmptySelfPage()
+                self.assertEqual(asyncio.run(collector.fetch_page(cursor=0, count=3)),
+                                 {"ok": False, "error": "self_identity_unavailable"})
+
+    def test_collection_does_not_require_a_self_profile_request(self):
+        class CollectionPage(FakePage):
+            async def evaluate(self, script, args):
+                if "selfProfileUrl" in args:
+                    raise AssertionError("collection should not resolve self identity")
+                return await super().evaluate(script, args)
+
+        collector = browser_collector.BrowserCollector(source="collection")
+        collector._page = CollectionPage()
+        self.assertTrue(asyncio.run(collector.fetch_page(cursor=0, count=3))["ok"])
 
     def test_invalid_item_limit_is_rejected_before_browser_start(self):
         with self.assertRaisesRegex(ValueError, "between 1 and 10000"):

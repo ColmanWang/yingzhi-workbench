@@ -17,6 +17,7 @@ from .media_kind import is_image_post
 COLLECTION_PAGE_URL = "https://www.douyin.com/user/self?showTab=favorite_collection"
 COLLECTION_API_URL = "https://www.douyin.com/aweme/v1/web/aweme/listcollection/"
 LIKES_PAGE_URL = "https://www.douyin.com/user/self?showTab=like"
+SELF_PROFILE_API_URL = "https://www.douyin.com/aweme/v1/web/user/profile/self/"
 LIKES_API_URL = "https://www.douyin.com/aweme/v1/web/aweme/favorite/"
 SOURCES = frozenset({"collection", "like"})
 SESSION_COOKIE_NAMES = frozenset({"sessionid", "sessionid_ss", "sid_guard"})
@@ -180,11 +181,36 @@ class BrowserCollector:
             except Exception:
                 continue
 
+    async def _self_sec_user_id(self) -> str | None:
+        """Resolve only the authenticated user's identity, never a feed author's ID."""
+        if self._page is None:
+            return None
+        result = await self._page.evaluate(
+            """async ({selfProfileUrl}) => {
+                try {
+                    const params = new URLSearchParams({device_platform: 'webapp', aid: '6383'});
+                    const response = await fetch(selfProfileUrl + '?' + params.toString(), {credentials: 'include'});
+                    if (!response.ok) return null;
+                    const data = await response.json();
+                    return {status_code: data.status_code, user: data.user ? {sec_uid: data.user.sec_uid} : null};
+                } catch (_) { return null; }
+            }""",
+            {"selfProfileUrl": SELF_PROFILE_API_URL},
+        )
+        if not isinstance(result, dict) or result.get("status_code") != 0:
+            return None
+        user = result.get("user")
+        value = user.get("sec_uid") if isinstance(user, dict) else None
+        return value if isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,200}", value) else None
+
     async def fetch_page(self, *, cursor: int, count: int) -> dict[str, Any]:
         if self._page is None:
             raise ValueError("browser is not open")
+        sec_user_id = await self._self_sec_user_id() if self.source == "like" else None
+        if self.source == "like" and not sec_user_id:
+            return {"ok": False, "error": "self_identity_unavailable"}
         result = await self._page.evaluate(
-            r"""async ({apiUrl, cursor, count, source}) => {
+            r"""async ({apiUrl, cursor, count, source, secUserId}) => {
                 const params = new URLSearchParams({
                     device_platform: 'webapp',
                     aid: '6383',
@@ -202,10 +228,7 @@ class BrowserCollector:
                         headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: body.toString(),
                     });
                 } else {
-                    const scripts = [...document.scripts].map(node => node.textContent || '').join('\n');
-                    const match = scripts.match(/"sec_user_id"\s*:\s*"([^"]+)"/) || scripts.match(/sec_user_id=([^&"\s]+)/);
-                    if (!match) return {ok: false, error: 'sec_user_id_missing'};
-                    params.set('sec_user_id', match[1]);
+                    params.set('sec_user_id', secUserId);
                     params.set('max_cursor', String(cursor));
                     params.set('count', String(count));
                     response = await fetch(apiUrl + '?' + params.toString(), {credentials: 'include'});
@@ -251,7 +274,7 @@ class BrowserCollector:
                     })),
                 };
             }""",
-            {"apiUrl": self.source == "collection" and COLLECTION_API_URL or LIKES_API_URL, "cursor": cursor, "count": count, "source": self.source},
+            {"apiUrl": self.source == "collection" and COLLECTION_API_URL or LIKES_API_URL, "cursor": cursor, "count": count, "source": self.source, "secUserId": sec_user_id},
         )
         if not isinstance(result, dict):
             raise ValueError("Douyin returned an invalid collection response")

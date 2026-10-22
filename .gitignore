@@ -7,3 +7,17 @@ config/config.local.json
 build/
 dist/
 *.egg-info/
+web/node_modules/
+web/dist/
+web/coverage/
+.coverage
+htmlcov/
+/cards/
+/knowledge/
+/models/
+.env
+.env.*
+!.env.example
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm

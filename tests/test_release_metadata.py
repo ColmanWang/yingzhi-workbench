@@ -61,7 +61,7 @@ class ReleaseMetadataTests(unittest.TestCase):
         )
 
     def test_readme_documents_vision_defaults(self):
-        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        readme = (ROOT / "docs" / "CLI_REFERENCE.md").read_text(encoding="utf-8")
         for needle in (
             "PaddlePaddle/PaddleOCR-VL-1.5",
             "Qwen/Qwen3-VL-32B-Instruct",

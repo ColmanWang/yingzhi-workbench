@@ -28,6 +28,8 @@ jobs:
         run: python -m compileall -q src tests
       - name: Unit and fixture E2E
         run: PYTHONPATH=src python -m unittest discover -s tests -v
+      - name: Card tools
+        run: python -m unittest discover -s tools/cards -v
       - name: Clean install
         run: |
           python -m venv /tmp/dftk-venv
@@ -42,3 +44,18 @@ jobs:
           /tmp/dftk-venv/bin/douyin-favorites-knowledge --config config/config.example.json review --review .runtime/review.json --approve-all --approval .runtime/approval.json
           /tmp/dftk-venv/bin/douyin-favorites-knowledge --config config/config.example.json promote --review .runtime/review.json --approval .runtime/approval.json --dry-run
           /tmp/dftk-venv/bin/douyin-favorites-knowledge --config config/config.example.json promote --review .runtime/review.json --approval .runtime/approval.json
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+        working-directory: web
+      - run: npm test
+        working-directory: web
+      - run: npm run build
+        working-directory: web

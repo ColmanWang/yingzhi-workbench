@@ -5,6 +5,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 TEXT_SUFFIXES = {".md", ".py", ".json", ".yml", ".yaml", ".toml", ".txt"}
+GENERATED_PARTS = {".git", ".venv", ".runtime", "node_modules", "dist", "coverage", "build"}
 
 
 class RepositoryTests(unittest.TestCase):
@@ -21,7 +22,7 @@ class RepositoryTests(unittest.TestCase):
         text = (ROOT / "skill" / "SKILL.md").read_text(encoding="utf-8")
         self.assertTrue(text.startswith("---\n"))
         header = text.split("---", 2)[1]
-        self.assertRegex(header, r"(?m)^name:\s+douyin-favorites-to-knowledge\s*$")
+        self.assertRegex(header, r"(?m)^name:\s+yingzhi-workbench\s*$")
         self.assertRegex(header, r"(?m)^description:\s+.+$")
 
     def test_no_private_paths_or_live_secrets(self):
@@ -34,7 +35,7 @@ class RepositoryTests(unittest.TestCase):
         }
         findings = []
         for path in ROOT.rglob("*"):
-            if not path.is_file() or ".git" in path.parts or path.suffix not in TEXT_SUFFIXES:
+            if not path.is_file() or GENERATED_PARTS.intersection(path.relative_to(ROOT).parts) or path.suffix not in TEXT_SUFFIXES:
                 continue
             text = path.read_text(encoding="utf-8", errors="ignore")
             for label, pattern in patterns.items():
