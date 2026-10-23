@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Play, ListTodo, BookOpen, Settings, Link, RefreshCw, Search, AudioLines, ExternalLink, ChevronRight, ArrowLeft, Download, Check, Info, X, LoaderCircle, Image, FileText, Video } from 'lucide-react';
 import { request, postJob, statusText, jobText, kindText, sourceText, safeSource, safeFile } from './api.js';
 const navs=[['library','视频资料库',Play],['jobs','任务中心',ListTodo],['cards','知识卡片',BookOpen],['settings','设置',Settings]];
@@ -61,11 +61,40 @@ export default function App(){
 }
 function Status({status}){return <span className={`status status-${status}`}>{statusText[status]||status||'待转写'}</span>;}
 function Empty({icon:Icon,title,text}){return <div className="empty-state"><Icon size={30}/><h3>{title}</h3><p>{text}</p></div>;}
-function Inspector({item,cards,tab,setTab,onBack}){
- if(!item)return <aside className="inspector"><Empty icon={FileText} title="选择一条资料" text="在这里查看逐字稿、原视频和已有卡片。"/><div className="analysis-note"><h3>AI 总结</h3><p><Info size={17}/>尚未配置 AI 总结功能</p></div></aside>;
- const link=safeSource(item.source_url),card=cards[0];
- return <aside className="inspector"><button className="mobile-back text-button" onClick={onBack}><ArrowLeft size={16}/>返回列表</button><div className="inspector-head"><h2>{item.title||'未命名视频'}</h2><dl><div><dt>作者</dt><dd>{item.author||'未知作者'}</dd></div><div><dt>来源</dt><dd>{sourceText[item.source]||item.source}</dd></div><div><dt>状态</dt><dd><Status status={item.status}/></dd></div></dl>{link&&<a className="original-link" href={link} target="_blank" rel="noreferrer"><ExternalLink size={15}/>查看原视频</a>}</div><div className="detail-tabs" role="tablist" aria-label="资料详情"><button role="tab" aria-selected={tab==='transcript'} onClick={()=>setTab('transcript')}>逐字稿</button><button role="tab" aria-selected={tab==='card'} onClick={()=>setTab('card')}>卡片{cards.length>0&&<span>{cards.length}</span>}</button></div><div className="detail-body">{tab==='transcript'?(item.transcript?<div className="transcript">{item.transcript}</div>:<div className="detail-empty"><FileText size={26}/><p>{item.media_kind==='image'||item.status==='skipped_image'?'这是图文内容，需图片文字识别；当前不会进行语音转写。':['no_speech','unavailable'].includes(item.status)?'本次没有识别到语音，可核对原视频后再决定是否重试。':item.status==='transcribing'?'本地转写正在进行，完成后会自动显示逐字稿。':item.error||'还没有逐字稿。勾选视频后点击“本地转写”。'}</p></div>):card?(<div className="detail-card">{safeFile(card.png_url)?<img src={safeFile(card.png_url)} alt={`${card.title}知识卡片`}/>:<p>卡片已保存为 HTML。</p>}<div className="card-links">{safeFile(card.html_url)&&<a href={safeFile(card.html_url)} target="_blank" rel="noreferrer">打开卡片<ExternalLink size={14}/></a>}{safeFile(card.png_url)&&<a href={safeFile(card.png_url)} download><Download size={14}/>下载图片</a>}</div></div>):<div className="detail-empty"><BookOpen size={26}/><p>这条资料还没有卡片。AI 总结服务尚未接入。</p></div>}</div><div className="analysis-note"><h3>AI 总结</h3><p><Info size={17}/>尚未配置 AI 总结功能</p></div></aside>;
+function DetailTabs({tab,setTab,cards,label='资料详情'}){
+ return <div className="detail-tabs" role="tablist" aria-label={label}><button role="tab" aria-selected={tab==='transcript'} onClick={()=>setTab('transcript')}>逐字稿</button><button role="tab" aria-selected={tab==='card'} onClick={()=>setTab('card')}>卡片{cards.length>0&&<span>{cards.length}</span>}</button></div>;
 }
+function DetailContent({item,cards,tab}){
+ const card=cards[0];
+ return <>{tab==='transcript'?(item.transcript?<div className="transcript">{item.transcript}</div>:<div className="detail-empty"><FileText size={26}/><p>{item.media_kind==='image'||item.status==='skipped_image'?'这是图文内容，需图片文字识别；当前不会进行语音转写。':['no_speech','unavailable'].includes(item.status)?'本次没有识别到语音，可核对原视频后再决定是否重试。':item.status==='transcribing'?'本地转写正在进行，完成后会自动显示逐字稿。':item.error||'还没有逐字稿。勾选视频后点击“本地转写”。'}</p></div>):card?(<div className="detail-card">{safeFile(card.png_url)?<img src={safeFile(card.png_url)} alt={`${card.title}知识卡片`}/>:<p>卡片已保存为 HTML。</p>}<div className="card-links">{safeFile(card.html_url)&&<a href={safeFile(card.html_url)} target="_blank" rel="noreferrer">打开卡片<ExternalLink size={14}/></a>}{safeFile(card.png_url)&&<a href={safeFile(card.png_url)} download><Download size={14}/>下载图片</a>}</div></div>):<div className="detail-empty"><BookOpen size={26}/><p>这条资料还没有卡片。AI 总结服务尚未接入。</p></div>}</>;
+}
+function Reader({item,cards,tab,setTab,onClose}){
+ const panel=useRef(null);
+ useEffect(()=>{
+  const previous=document.activeElement,overflow=document.body.style.overflow;
+  document.body.style.overflow='hidden';panel.current.querySelector('button')?.focus();
+  function keydown(event){
+   if(event.key==='Escape'){event.preventDefault();onClose();}
+   if(event.key==='Tab'){
+    const targets=[...panel.current.querySelectorAll('button,a[href]')],first=targets[0],last=targets[targets.length-1];
+    if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus();}
+    else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus();}
+   }
+  }
+  document.addEventListener('keydown',keydown);
+  return()=>{document.body.style.overflow=overflow;document.removeEventListener('keydown',keydown);previous?.focus();};
+ },[onClose]);
+ return <div className="reader-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)onClose();}}><section ref={panel} className="reader-dialog" role="dialog" aria-modal="true" aria-labelledby="reader-title"><header className="reader-header"><div><span className="reader-eyebrow">展开阅读 · {sourceText[item.source]} · {item.author||'未知作者'}</span><h2 id="reader-title">{item.title||'未命名视频'}</h2></div><button className="button secondary" aria-label="关闭阅读" onClick={onClose}><X size={18}/>关闭</button></header><DetailTabs tab={tab} setTab={setTab} cards={cards} label="展开阅读内容"/><div className="reader-body"><DetailContent item={item} cards={cards} tab={tab}/></div></section></div>;
+}
+function Inspector({item,cards,tab,setTab,onBack}){
+ const [expanded,setExpanded]=useState(false);
+ const closeReader=useCallback(()=>setExpanded(false),[]);
+ useEffect(()=>setExpanded(false),[item?.id]);
+ if(!item)return <aside className="inspector"><Empty icon={FileText} title="选择一条资料" text="在这里查看逐字稿、原视频和已有卡片。"/><div className="analysis-note"><p><Info size={17}/>尚未配置 AI 总结功能</p></div></aside>;
+ const link=safeSource(item.source_url);
+ return <><aside className="inspector"><button className="mobile-back text-button" onClick={onBack}><ArrowLeft size={16}/>返回列表</button><div className="inspector-head"><h2 title={item.title}>{item.title||'未命名视频'}</h2><dl><div><dt>作者</dt><dd>{item.author||'未知作者'}</dd></div><div><dt>来源</dt><dd>{sourceText[item.source]||item.source}</dd></div><div><dt>状态</dt><dd><Status status={item.status}/></dd></div></dl><div className="inspector-actions">{link&&<a className="original-link" href={link} target="_blank" rel="noreferrer"><ExternalLink size={15}/>查看原视频</a>}<button className="button compact secondary" onClick={()=>setExpanded(true)}><BookOpen size={15}/>展开阅读</button></div></div><DetailTabs tab={tab} setTab={setTab} cards={cards}/><div className="detail-body"><DetailContent item={item} cards={cards} tab={tab}/></div><div className="analysis-note"><p><Info size={15}/>尚未配置 AI 总结功能</p></div></aside>{expanded&&<Reader item={item} cards={cards} tab={tab} setTab={setTab} onClose={closeReader}/>}</>;
+}
+
 function JobRow({job,compact=false}){
  const total=Number(job.total)||0,done=Math.max(0,Number(job.done)||0),busy=busyStates.has(job.status);
  return <article className={`job-row ${compact?'compact-job':''}`}><div className="job-icon">{busy?<LoaderCircle size={21} className="spin"/>:job.status==='completed'?<Check size={21}/>:<AudioLines size={21}/>}</div><div className="job-description"><strong>{kindText[job.kind]||job.kind}<span>{sourceText[job.source]||''}</span></strong><p>{job.message||jobText[job.status]||job.status}</p></div><div className="job-progress">{total>0?<><progress value={Math.min(done,total)} max={total} aria-label="任务进度"/><span>{done} / {total}</span></>:<span className="no-total">{busy?'等待任务返回进度':''}</span>}</div><span className={`job-status job-status-${job.status}`}>{jobText[job.status]||job.status}</span></article>;

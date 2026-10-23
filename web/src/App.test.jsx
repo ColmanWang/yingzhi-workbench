@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, waitFor, fireEvent, cleanup } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, cleanup, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App.jsx';
@@ -82,6 +82,24 @@ describe('工作台真实数据流程',()=>{
   const u=userEvent.setup();render(<App/>);await screen.findByRole('button',{name:'查看 测试收藏视频'});await u.click(screen.getByRole('button',{name:'查看 测试收藏视频'}));await u.click(screen.getByRole('button',{name:'返回列表'}));
   await u.click(screen.getByRole('button',{name:'连接抖音'}));expect(screen.getByRole('status')).toHaveTextContent('连接抖音已加入任务');await u.click(screen.getByRole('button',{name:'关闭提示'}));expect(screen.queryByRole('status')).not.toBeInTheDocument();
   await u.click(screen.getByRole('button',{name:'知识卡片'}));expect(screen.getByText('还没有知识卡片')).toBeInTheDocument();await u.click(screen.getByRole('link',{name:/映知/}));expect(screen.getByRole('heading',{name:'视频资料库'})).toBeInTheDocument();
+ });
+
+ it('展开阅读保留逐字稿和卡片，关闭及 Escape 返回展开按钮',async()=>{
+  extraData={cards:[{id:'c1',item_id:'collection-1',title:'完整卡片',png_url:'/files/cards/a.png',html_url:'/files/cards/a.html'}]};
+  const u=userEvent.setup();render(<App/>);
+  const expand=await screen.findByRole('button',{name:'展开阅读'});await u.click(expand);
+  const reader=screen.getByRole('dialog',{name:'测试收藏视频'});
+  expect(within(reader).getByText('这里是真实逐字稿。')).toBeInTheDocument();
+  await u.click(within(reader).getByRole('tab',{name:/卡片/}));
+  expect(within(reader).getByAltText('完整卡片知识卡片')).toBeInTheDocument();
+  expect(within(reader).getByRole('link',{name:/下载图片/})).toHaveAttribute('href','/files/cards/a.png');
+  within(reader).getByRole('button',{name:'关闭阅读'}).focus();await u.tab({shift:true});
+  expect(within(reader).getByRole('link',{name:/下载图片/})).toHaveFocus();await u.tab();
+  expect(within(reader).getByRole('button',{name:'关闭阅读'})).toHaveFocus();
+  await u.click(within(reader).getByRole('button',{name:'关闭阅读'}));
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();expect(expand).toHaveFocus();
+  await u.click(expand);await u.keyboard('{Escape}');
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();expect(expand).toHaveFocus();
  });
 
 });
