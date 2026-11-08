@@ -7,6 +7,13 @@ if [[ ! -x "$PYTHON" || ! -f "$REPO/web/dist/index.html" ]]; then
   echo '请先按 docs/WORKBENCH.md 完成依赖安装和网页构建。'
   exit 1
 fi
+PY_MINOR=$("$PYTHON" -c 'import sys; print(sys.version_info.minor if sys.version_info.major == 3 else 0)')
+if [[ "$PY_MINOR" -lt 10 ]]; then
+  echo "错误：映知工作台需要 Python 3.10 或更高版本（当前虚拟环境 Python 版本过低）。"
+  echo "请使用现代 Python 版本（推荐 3.12）重新创建虚拟环境："
+  echo "  uv venv --python 3.12 .venv"
+  exit 1
+fi
 mkdir -p "$DATA_ROOT/.runtime/bin"
 chmod 700 "$DATA_ROOT/.runtime"
 export PYTHONPATH="$REPO/src"

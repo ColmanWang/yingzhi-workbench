@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 import webbrowser
 from pathlib import Path
 
@@ -9,6 +10,12 @@ from .server import make_server
 
 
 def main():
+    if sys.version_info < (3, 10):
+        sys.exit(
+            f"错误：映知工作台需要 Python 3.10 或更高版本（当前版本为 {sys.version.split()[0]}）。\n"
+            "建议使用 Python 3.12 并在虚拟环境中运行：\n"
+            "  uv venv --python 3.12 .venv\n"
+        )
     parser = argparse.ArgumentParser(description='启动本地抖音知识工作台')
     parser.add_argument('--data-dir', type=Path, required=True)
     parser.add_argument('--knowledge-dir', type=Path, required=True)

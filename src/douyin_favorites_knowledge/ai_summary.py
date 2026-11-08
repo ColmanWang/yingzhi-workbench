@@ -8,6 +8,8 @@ import urllib.request
 from typing import Any
 from urllib.parse import urlsplit
 
+from .security import safe_error_message
+
 DEFAULT_TIMEOUT = 60
 DEFAULT_ENDPOINT = "https://api.siliconflow.cn/v1/chat/completions"
 DEFAULT_MODEL = "Qwen/Qwen2.5-7B-Instruct"
@@ -216,4 +218,4 @@ def check_llm_connection(
         )
         return {"ok": True, "reply": reply[:100].strip()}
     except Exception as exc:
-        return {"ok": False, "error": str(exc)}
+        return {"ok": False, "error": safe_error_message(exc)}

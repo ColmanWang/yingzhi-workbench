@@ -8,7 +8,9 @@ BLOCKED_PATTERNS = {
     "reasoning tag": re.compile(r"<\s*/?\s*(?:think|analysis)\b", re.IGNORECASE),
     "Unicode replacement character": re.compile("\ufffd"),
     "GitHub token": re.compile(r"gh[oprsu]_[A-Za-z0-9]{20,}"),
-    "OpenAI-style key": re.compile(r"sk-[A-Za-z0-9_-]{20,}"),
+    "OpenAI-style key": re.compile(r"sk-[A-Za-z0-9_-]{10,}"),
+    "Bearer token": re.compile(r"Bearer\s+[A-Za-z0-9_.-]{10,}", re.IGNORECASE),
+    "Sensitive cookies": re.compile(r"(?:sessionid|passport_csrf_token|ttwid)=[A-Za-z0-9_%-]+", re.IGNORECASE),
     "Apify token": re.compile(r"apify_api_[A-Za-z0-9_-]{20,}"),
 }
 

@@ -229,7 +229,10 @@ export default function SettingsView({
 
       <div className="privacy-note">
         <Info size={17} />
-        工作台只在本机开放。API Key 仅保存在本机 SQLite，不会上传公开仓库。
+        <div>
+          <strong>隐私与安全准则：</strong>
+          工作台设计为仅限本机单机使用（127.0.0.1）。严禁通过端口映射、内网穿透或公网 IP 开放给外部网络，以防大模型 API Key 盗刷或个人收藏泄露。
+        </div>
       </div>
     </section>
   );

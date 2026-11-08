@@ -13,6 +13,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlsplit
 
 from .app import SAFE_CARD, Workbench
+from ..security import safe_error_message
 
 MAX_BODY = 32_768
 
@@ -47,7 +48,10 @@ def make_server(app: Workbench, static_dir: Path, port: int = 8765):
             pass
 
         def _json(self, status, data=None, error=None):
-            payload = {'success': error is None, **({'data': data} if error is None else {'error': {'message': error}})}
+            clean_error = None
+            if error is not None:
+                clean_error = safe_error_message(error if isinstance(error, BaseException) else Exception(str(error)))
+            payload = {'success': clean_error is None, **({'data': data} if clean_error is None else {'error': {'message': clean_error}})}
             body = json.dumps(payload, ensure_ascii=False).encode('utf-8')
             self.send_response(status)
             self.send_header('Content-Type', 'application/json; charset=utf-8')
@@ -57,7 +61,13 @@ def make_server(app: Workbench, static_dir: Path, port: int = 8765):
             self.send_header('Referrer-Policy', 'no-referrer')
             self.end_headers(); self.wfile.write(body)
 
+        def _is_loopback(self):
+            client_ip = getattr(self, 'client_address', [None])[0]
+            return client_ip in {'127.0.0.1', '::1', 'localhost'}
+
         def _same_origin(self):
+            if not self._is_loopback():
+                return False
             host = self.headers.get('Host', '')
             allowed = {f'127.0.0.1:{self.server.server_port}', f'localhost:{self.server.server_port}'}
             if host not in allowed:
