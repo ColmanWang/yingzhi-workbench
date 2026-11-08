@@ -98,6 +98,33 @@ class WorkbenchTests(unittest.TestCase):
         self.assertNotIn('signed.invalid', json.dumps(self.app.items()))
         self.assertTrue((self.knowledge / '工作台转写' / 'like-123456.md').exists())
 
+    @patch('douyin_favorites_knowledge.workbench.app.summarize_item')
+    def test_summarize_generates_card_files(self, mock_summarize):
+        mock_summarize.return_value = {
+            'title': '总结出的卡片标题',
+            'author': '测试作者',
+            'source_url': 'https://www.douyin.com/video/123456',
+            'summary': '这是总结内容',
+            'points': ['要点一', '要点二'],
+            'actions': ['行动一'],
+            'synthetic': False,
+        }
+        self.app.collector = lambda **kw: [{'aweme_id':'123456','description':'原标题','author':'测试作者','play_url':'https://example.com/play','media_kind':'video'}]
+        job = self.app.submit({'kind':'collect','source':'collection','limit':1}); self.app.run_job(job['id'])
+        self.app.transcriber = lambda item, ctx: {'transcript_status':'success','transcript':'这是转写文字'}
+        job = self.app.submit({'kind':'transcribe','source':'collection','ids':['collection-123456']}); self.app.run_job(job['id'])
+        
+        self.app.save_analysis_settings({'enabled': True, 'api_key': 'sk-test', 'model': 'test-model'})
+        job = self.app.submit({'kind':'summarize','source':'collection','ids':['collection-123456']})
+        self.app.run_job(job['id'])
+        
+        self.assertEqual(self.app.jobs()[0]['status'], 'completed')
+        self.assertTrue((self.cards / 'collection-123456.html').exists())
+        self.assertTrue((self.cards / 'collection-123456.json').exists())
+        cards = self.app.cards()
+        self.assertEqual(len(cards), 1)
+        self.assertEqual(cards[0]['title'], '总结出的卡片标题')
+
     def test_restart_marks_incomplete_jobs(self):
         self.app.submit({'kind':'login','source':'like'})
         self.app.close()

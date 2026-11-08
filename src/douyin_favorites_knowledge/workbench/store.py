@@ -30,6 +30,7 @@ class Store:
                     id TEXT PRIMARY KEY, kind TEXT, source TEXT, status TEXT,
                     done INTEGER, total INTEGER, message TEXT, created_at TEXT,
                     updated_at TEXT, payload TEXT);
+                CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
             ''')
             db.execute("UPDATE jobs SET status='interrupted', message='上次任务被中断，可重新发起', updated_at=? WHERE status IN ('queued','running')", (now(),))
             db.execute("UPDATE items SET status='interrupted', error='上次转写被中断' WHERE status='transcribing'")
@@ -81,6 +82,21 @@ class Store:
         fields = ('id','kind','source','status','done','total','message','created_at','updated_at')
         with self.connect() as db:
             db.execute('INSERT OR REPLACE INTO jobs VALUES (?,?,?,?,?,?,?,?,?,?)', tuple(job[k] for k in fields) + (json.dumps(job['payload']),))
+
+    def get_setting(self, key: str, default: Any = None) -> Any:
+        with self.connect() as db:
+            row = db.execute('SELECT value FROM settings WHERE key=?', (key,)).fetchone()
+        if row is None:
+            return default
+        try:
+            return json.loads(row['value'])
+        except (ValueError, TypeError):
+            return row['value']
+
+    def set_setting(self, key: str, value: Any) -> None:
+        serialized = json.dumps(value, ensure_ascii=False) if not isinstance(value, str) else value
+        with self.connect() as db:
+            db.execute('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', (key, serialized))
 
 
 def parse_note(path: Path) -> dict | None:

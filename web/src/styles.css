@@ -12,3 +12,17 @@
  .inspector-head{padding-top:12px;padding-bottom:10px}
  .inspector .detail-body{flex:none;min-height:180px;overflow:visible}
 }
+
+/* AI 设置表单与生成按钮增强 */
+.settings-form{border:1px solid var(--line);border-radius:7px;padding:22px;background:#fff;display:flex;flex-direction:column;gap:18px}
+.form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px}
+.form-group{display:flex;flex-direction:column;gap:6px}
+.form-group label{font-size:13px;font-weight:600;color:#2b3b34}
+.form-group input,.form-group select{border:1px solid #dce2e0;border-radius:6px;padding:9px 12px;font-size:13px;color:#22302b;background:#fff;transition:border-color .15s}
+.form-group input:focus,.form-group select:focus{border-color:#3b6a55;outline:none}
+.form-hint{font-size:11px;color:#8a9690;line-height:1.5}
+.form-actions{display:flex;align-items:center;gap:12px;margin-top:6px}
+.button.sparkle{background:linear-gradient(135deg,#223d35,#2f5a4c);color:#fff;border:1px solid #223d35}
+.button.sparkle:not(:disabled):hover{background:linear-gradient(135deg,#2f5649,#3d7160)}
+.generate-card-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;background:#f2f7f4;border:1px solid #d7e6dc;border-radius:6px;padding:9px 12px;margin-bottom:12px}
+.generate-card-bar span{font-size:12px;color:#295944}

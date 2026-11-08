@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import queue
 from collections import deque
 import mimetypes
 import secrets
@@ -77,6 +78,8 @@ def make_server(app: Workbench, static_dir: Path, port: int = 8765):
             try:
                 if path == '/api/bootstrap':
                     return self._json(200, app.bootstrap())
+                if path == '/api/events':
+                    return self._sse_stream()
                 if path == '/api/items':
                     source = parse_qs(parts.query).get('source', ['all'])[0]
                     return self._json(200, app.items(source))
@@ -127,6 +130,34 @@ def make_server(app: Workbench, static_dir: Path, port: int = 8765):
             self.send_header('Content-Security-Policy', csp)
             self.end_headers(); self.wfile.write(data)
 
+        def _sse_stream(self):
+            event_queue = app.events.subscribe()
+            try:
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/event-stream; charset=utf-8')
+                self.send_header('Cache-Control', 'no-cache, no-transform')
+                self.send_header('Connection', 'keep-alive')
+                self.send_header('X-Accel-Buffering', 'no')
+                self.end_headers()
+                
+                init_body = json.dumps({'type': 'init', 'csrf_token': app.csrf_token}, ensure_ascii=False)
+                self.wfile.write(f'data: {init_body}\n\n'.encode('utf-8'))
+                self.wfile.flush()
+
+                while not app._closed:
+                    try:
+                        event = event_queue.get(timeout=15)
+                        data = json.dumps(event, ensure_ascii=False)
+                        self.wfile.write(f'data: {data}\n\n'.encode('utf-8'))
+                        self.wfile.flush()
+                    except queue.Empty:
+                        self.wfile.write(b': ping\n\n')
+                        self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                pass
+            finally:
+                app.events.unsubscribe(event_queue)
+
         def do_POST(self):
             if not self._rate_allowed('POST'):
                 return self._json(429, error='操作过于频繁，请稍后再试')
@@ -136,19 +167,50 @@ def make_server(app: Workbench, static_dir: Path, port: int = 8765):
             if self.headers.get('Content-Type', '').split(';')[0].strip() != 'application/json':
                 return self._json(415, error='需要 JSON 请求')
             path = urlsplit(self.path).path
-            if path != '/api/jobs':
+            if path not in {'/api/jobs', '/api/jobs/cancel', '/api/settings', '/api/settings/test-llm', '/api/items/import-url', '/api/export/zip'}:
                 return self._json(404, error='未找到操作')
             try:
                 size = int(self.headers.get('Content-Length', '0'))
                 if not 0 < size <= MAX_BODY:
                     return self._json(413, error='请求体大小不正确')
                 data = json.loads(self.rfile.read(size))
-                return self._json(202, app.submit(data))
-            except (ValueError, TypeError):
-                return self._json(400, error='任务参数不正确')
-            except RuntimeError:
-                return self._json(409, error='已有任务正在处理，请稍后再试')
+                if path == '/api/jobs':
+                    return self._json(202, app.submit(data))
+                if path == '/api/jobs/cancel':
+                    job_id = str(data.get('id') or '').strip()
+                    if not job_id:
+                        return self._json(400, error='缺少任务 ID')
+                    ok = app.cancel_job(job_id)
+                    return self._json(200, {'cancelled': ok, 'id': job_id})
+                if path == '/api/items/import-url':
+                    url = str(data.get('url') or '').strip()
+                    if not url:
+                        return self._json(400, error='请输入有效的抖音视频链接或分享口令')
+                    source = str(data.get('source') or 'collection').strip()
+                    item = app.import_single_url(url, source=source)
+                    return self._json(200, item)
+                if path == '/api/export/zip':
+                    ids = data.get('ids', [])
+                    if not isinstance(ids, list) or not ids:
+                        return self._json(400, error='请选择需要导出的卡片')
+                    zip_data = app.export_zip(ids)
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'application/zip')
+                    self.send_header('Content-Disposition', 'attachment; filename="cards-export.zip"')
+                    self.send_header('Content-Length', str(len(zip_data)))
+                    self.send_header('Cache-Control', 'no-store')
+                    self.end_headers()
+                    self.wfile.write(zip_data)
+                    return
+                if path == '/api/settings':
+                    return self._json(200, app.save_settings(data) if hasattr(app, 'save_settings') else app.save_analysis_settings(data))
+                if path == '/api/settings/test-llm':
+                    return self._json(200, app.test_analysis_connection(data))
+            except (ValueError, TypeError) as exc:
+                return self._json(400, error=str(exc) or '任务参数不正确')
+            except RuntimeError as exc:
+                return self._json(409, error=str(exc) or '已有任务正在处理，请稍后再试')
             except Exception:
-                return self._json(500, error='无法创建任务，请重试')
+                return self._json(500, error='无法完成操作，请重试')
 
     return LocalServer(('127.0.0.1', port), Handler)

@@ -128,6 +128,11 @@ class BrowserCollector:
                     "headless": headless,
                     "viewport": {"width": 1280, "height": 800},
                     "locale": "zh-CN",
+                    "user_agent": (
+                        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+                    ),
+                    "args": ["--disable-blink-features=AutomationControlled"],
                 }
                 if channel:
                     kwargs["channel"] = channel
@@ -164,6 +169,11 @@ class BrowserCollector:
             raise ValueError("browser is not open")
         target = COLLECTION_PAGE_URL if self.source == "collection" else LIKES_PAGE_URL
         await self._page.goto(target, wait_until="domcontentloaded", timeout=45_000)
+        try:
+            await self._page.wait_for_load_state("networkidle", timeout=6_000)
+        except Exception:
+            pass
+        await asyncio.sleep(1.5)
 
     async def authenticated(self) -> bool:
         if self._context is None:
@@ -190,10 +200,21 @@ class BrowserCollector:
                 try {
                     const params = new URLSearchParams({device_platform: 'webapp', aid: '6383'});
                     const response = await fetch(selfProfileUrl + '?' + params.toString(), {credentials: 'include'});
-                    if (!response.ok) return null;
-                    const data = await response.json();
-                    return {status_code: data.status_code, user: data.user ? {sec_uid: data.user.sec_uid} : null};
-                } catch (_) { return null; }
+                    if (response.ok) {
+                        const data = await response.json();
+                        if (data && data.status_code === 0 && data.user && data.user.sec_uid) {
+                            return {status_code: 0, user: {sec_uid: data.user.sec_uid}};
+                        }
+                    }
+                } catch (_) {}
+                try {
+                    const scripts = [...document.scripts].map(node => node.textContent || '').join('\\n');
+                    const match = scripts.match(/"sec_user_id"\\s*:\\s*"([^"]+)"/) || scripts.match(/"sec_uid"\\s*:\\s*"([^"]+)"/) || scripts.match(/sec_user_id=([^&"\\s]+)/);
+                    if (match && match[1]) {
+                        return {status_code: 0, user: {sec_uid: match[1]}};
+                    }
+                } catch (_) {}
+                return null;
             }""",
             {"selfProfileUrl": SELF_PROFILE_API_URL},
         )
@@ -236,7 +257,15 @@ class BrowserCollector:
                 if (!response.ok) {
                     return {ok: false, http_status: response.status};
                 }
-                const data = await response.json();
+                let data;
+                try {
+                    data = await response.json();
+                } catch (err) {
+                    return {ok: false, error: 'non_json_response', http_status: response.status};
+                }
+                if (!data || typeof data !== 'object') {
+                    return {ok: false, error: 'invalid_data_response'};
+                }
                 return {
                     ok: data.status_code === 0,
                     status_code: data.status_code,
@@ -317,6 +346,7 @@ async def _login(*, timeout_seconds: int, channel: str | None, source: str = "co
     collector = BrowserCollector(channel=channel, source=source)
     await collector.open(headless=False)
     try:
+        await collector.clear_session()
         await collector.navigate()
         deadline = asyncio.get_running_loop().time() + timeout_seconds
         while asyncio.get_running_loop().time() < deadline:
@@ -443,7 +473,12 @@ async def _collect(
             page_size = min(20, max_items - len(collected))
             result = await collector.fetch_page(cursor=cursor, count=page_size)
             if not result.get("ok"):
-                raise ValueError("Douyin collection access failed; login again and retry")
+                err_hint = result.get("error") or (f"HTTP {result.get('http_status')}" if result.get('http_status') else "未知状态")
+                if result.get("error") == "self_identity_unavailable":
+                    raise ValueError("无法获取用户身份信息；若在抖音开启了喜欢列表私密，请在抖音App开启公开，或改用收藏列表")
+                if result.get("error") == "non_json_response":
+                    raise ValueError("抖音返回了非 JSON 内容，可能触发了滑块验证码或风控限制")
+                raise ValueError(f"Douyin collection access failed ({err_hint}); login again and retry")
             items = result.get("items")
             if not isinstance(items, list):
                 raise ValueError("Douyin returned an invalid collection item list")
@@ -496,7 +531,9 @@ def collect_browser_favorites(
     except ValueError:
         raise
     except Exception as exc:
-        raise ValueError("browser collection failed; close other sync processes and retry") from exc
+        cause = getattr(exc, "__cause__", None)
+        detail = f": {cause}" if cause and str(cause) != str(exc) else f": {exc}"
+        raise ValueError(f"browser collection failed{detail}") from exc
     if headed:
         print("名单已抓完，浏览器窗口已关闭。接下来做转写。窗口关掉不是闪退。", file=sys.stderr)
     return items

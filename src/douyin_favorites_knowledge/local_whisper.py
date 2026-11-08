@@ -21,6 +21,9 @@ MAX_MEDIA_BYTES = 512 * 1024 * 1024
 TEMP_PREFIX = "douyin-local-asr-"
 STALE_TEMP_SECONDS = 24 * 60 * 60
 DEFAULT_SAMPLE_RATE = "16000"
+DEFAULT_LANGUAGE = "zh"
+DEFAULT_INITIAL_PROMPT = "以下是普通话视频内容，使用规范简体中文输出，包含正确的标点符号。"
+DEFAULT_MODEL = "medium"
 _MODEL_CACHE: dict[str, Any] = {}
 _MODEL_ERRORS: dict[str, str] = {}
 
@@ -132,6 +135,15 @@ def _load_model(model_name: str):
 
         model = WhisperModel(model_name, device="cpu", compute_type="int8")
     except Exception as exc:
+        if model_name != "small":
+            try:
+                from faster_whisper import WhisperModel
+
+                model = WhisperModel("small", device="cpu", compute_type="int8")
+                _MODEL_CACHE[model_name] = model
+                return model
+            except Exception:
+                pass
         message = f"{type(exc).__name__}: {exc}"
         _MODEL_ERRORS[model_name] = message[:300]
         raise RuntimeError(message) from exc
@@ -149,7 +161,7 @@ def transcribe(item: dict[str, Any], context: dict[str, Any]) -> dict[str, str]:
     candidates = _candidate_urls(item)
     if not candidates:
         return _failed("unavailable")
-    model_name = str(context.get("model") or "small").strip() or "small"
+    model_name = str(context.get("model") or DEFAULT_MODEL).strip() or DEFAULT_MODEL
     options = context.get("options") if isinstance(context.get("options"), dict) else {}
     max_media_bytes = int(options.get("max_media_bytes", MAX_MEDIA_BYTES))
     if max_media_bytes <= 0:
@@ -186,7 +198,32 @@ def transcribe(item: dict[str, Any], context: dict[str, Any]) -> dict[str, str]:
             if not extracted_ok:
                 return _failed(last, last_error)
             model = _load_model(model_name)
-            segments, _ = model.transcribe(str(audio_path), vad_filter=True, task="transcribe")
+            language = str(options.get("language") or context.get("language") or DEFAULT_LANGUAGE).strip()
+            if language.lower() in {"auto", "none", ""}:
+                language = None
+
+            initial_prompt = str(
+                options.get("initial_prompt")
+                or context.get("initial_prompt")
+                or DEFAULT_INITIAL_PROMPT
+            ).strip()
+
+            condition_on_previous_text = bool(options.get("condition_on_previous_text", False))
+            vad_parameters = options.get("vad_parameters") or {"min_silence_duration_ms": 500}
+
+            transcribe_kwargs: dict[str, Any] = {
+                "vad_filter": True,
+                "task": "transcribe",
+                "condition_on_previous_text": condition_on_previous_text,
+            }
+            if language:
+                transcribe_kwargs["language"] = language
+            if initial_prompt:
+                transcribe_kwargs["initial_prompt"] = initial_prompt
+            if vad_parameters:
+                transcribe_kwargs["vad_parameters"] = vad_parameters
+
+            segments, _ = model.transcribe(str(audio_path), **transcribe_kwargs)
             transcript = "\n".join(segment.text.strip() for segment in segments if segment.text.strip()).strip()
             if transcript:
                 return {

@@ -14,7 +14,16 @@ let extraData;
 beforeEach(() => {
  post = vi.fn();extraData={};
  vi.stubGlobal('fetch',vi.fn(async (url, options) => {
-  if(options?.method==='POST'){post(JSON.parse(options.body),options.headers); return {ok:true,json:async()=>({success:true,data:{id:'job-1',kind:'collect',status:'queued',source:'collection',done:0,total:3,message:'等待执行'}})};}
+  if(options?.method==='POST'){
+   post(JSON.parse(options.body),options.headers, url);
+   if (url === '/api/items/import-url') {
+     return {ok:true,json:async()=>({success:true,data:{id:'new-single-1',title:'单条录入视频',author:'独立作者',source:'collection',status:'pending',media_kind:'video',transcript:''}})};
+   }
+   if (url === '/api/export/zip') {
+     return {ok:true,blob:async()=>new Blob(['mock-zip-bytes'])};
+   }
+   return {ok:true,json:async()=>({success:true,data:{id:'job-1',kind:'collect',status:'queued',source:'collection',done:0,total:3,message:'等待执行'}})};
+  }
   let data = url==='/api/cards'?[]:{items,jobs:[],cards:[],settings:{transcription:{ready:true,missing:[],model:'small'},analysis:{configured:false},local_only:true},csrf_token:'test-token',...extraData};
   return {ok:true,json:async()=>({success:true,data})};
  }));
@@ -94,12 +103,86 @@ describe('工作台真实数据流程',()=>{
   expect(within(reader).getByAltText('完整卡片知识卡片')).toBeInTheDocument();
   expect(within(reader).getByRole('link',{name:/下载图片/})).toHaveAttribute('href','/files/cards/a.png');
   within(reader).getByRole('button',{name:'关闭阅读'}).focus();await u.tab({shift:true});
-  expect(within(reader).getByRole('link',{name:/下载图片/})).toHaveFocus();await u.tab();
+  expect(within(reader).getByRole('button',{name:/重置卡片风格/})).toHaveFocus();await u.tab();
   expect(within(reader).getByRole('button',{name:'关闭阅读'})).toHaveFocus();
   await u.click(within(reader).getByRole('button',{name:'关闭阅读'}));
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();expect(expand).toHaveFocus();
   await u.click(expand);await u.keyboard('{Escape}');
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();expect(expand).toHaveFocus();
+ });
+
+ it('设置页面支持配置大模型与测试连接',async()=>{
+  const u=userEvent.setup();render(<App/>);await screen.findByRole('button',{name:'查看 测试收藏视频'});
+  await u.click(screen.getByRole('button',{name:'设置'}));
+  expect(screen.getByText('AI 总结与卡片生成')).toBeInTheDocument();
+  expect(screen.getByPlaceholderText('https://api.siliconflow.cn/v1/chat/completions')).toBeInTheDocument();
+  await u.click(screen.getByRole('button',{name:'测试连接'}));
+  expect(post).toHaveBeenCalled();
+ });
+
+ it('逐字稿就绪后可直接发起生成卡片任务',async()=>{
+  const u=userEvent.setup();render(<App/>);
+  await screen.findByRole('button',{name:'查看 测试收藏视频'});
+  const genBtn=screen.getByRole('button',{name:'一键提炼卡片'});
+  await u.click(genBtn);
+  expect(post).toHaveBeenCalled();
+  expect(post.mock.calls[0][0].kind).toBe('summarize');
+ });
+
+ it('支持取消正在执行或等待中的任务',async()=>{
+  extraData={
+   jobs:[{id:'j-cancel-1',kind:'transcribe',source:'like',status:'running',done:0,total:3,message:'处理中'}],
+  };
+  const u=userEvent.setup();render(<App/>);
+  await screen.findByRole('button',{name:'查看 测试收藏视频'});
+  await u.click(screen.getByRole('button',{name:'任务中心'}));
+  const cancelBtns=screen.getAllByRole('button',{name:'取消任务'});
+  expect(cancelBtns[0]).toBeInTheDocument();
+  await u.click(cancelBtns[0]);
+  expect(post).toHaveBeenCalled();
+  expect(post.mock.calls[0][0]).toEqual({id:'j-cancel-1'});
+ });
+
+ it('支持通过导入链接弹窗录入单条抖音链接',async()=>{
+  const u=userEvent.setup();render(<App/>);
+  await screen.findByRole('button',{name:'查看 测试收藏视频'});
+  await u.click(screen.getByRole('button',{name:'导入链接'}));
+  expect(screen.getByRole('dialog',{name:'快捷导入单条抖音视频'})).toBeInTheDocument();
+  const input=screen.getByPlaceholderText(/直接粘贴手机端复制/);
+  await u.type(input,'https://v.douyin.com/abc1234/');
+  await u.click(screen.getByRole('button',{name:'立即解析导入'}));
+  expect(post).toHaveBeenCalled();
+  expect(post.mock.calls[0][0]).toEqual({url:'https://v.douyin.com/abc1234/',source:'collection'});
+  expect(await screen.findByText('视频已成功导入！可立即发起转写或提炼卡片。')).toBeInTheDocument();
+ });
+
+ it('知识卡片视图支持按主题筛选及批量导出 ZIP',async()=>{
+  window.URL.createObjectURL = vi.fn(() => 'blob:mock');
+  window.URL.revokeObjectURL = vi.fn();
+  extraData={
+   cards:[
+     {id:'c1',item_id:'collection-1',title:'经典卡片',theme:'classic',png_url:'/files/cards/1.png',html_url:'/files/cards/1.html'},
+     {id:'c2',item_id:'like-2',title:'极简卡片',theme:'minimal',png_url:'/files/cards/2.png',html_url:'/files/cards/2.html'},
+   ]
+  };
+  const u=userEvent.setup();render(<App/>);
+  await screen.findByRole('button',{name:'查看 测试收藏视频'});
+  await u.click(screen.getByRole('button',{name:'知识卡片'}));
+  expect(screen.getByText('经典卡片')).toBeInTheDocument();
+  expect(screen.getByText('极简卡片')).toBeInTheDocument();
+
+  // 测试主题筛选
+  const themeSelect=screen.getByRole('combobox');
+  await u.selectOptions(themeSelect, 'minimal');
+  expect(screen.queryByText('经典卡片')).not.toBeInTheDocument();
+  expect(screen.getByText('极简卡片')).toBeInTheDocument();
+
+  // 测试导出 ZIP
+  const exportBtn=screen.getByRole('button',{name:'批量导出 ZIP'});
+  await u.click(exportBtn);
+  expect(post).toHaveBeenCalled();
+  expect(post.mock.calls[0][0]).toEqual({ids:['like-2']});
+  expect(await screen.findByText(/已成功打包导出/)).toBeInTheDocument();
  });
 
 });

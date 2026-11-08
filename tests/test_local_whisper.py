@@ -135,3 +135,38 @@ class LocalWhisperTests(unittest.TestCase):
         ])
         cookie = {key.lower(): value for key, value in seen[1][1].items()}.get("cookie", "")
         self.assertIn("ttwid=cdn-secret", cookie)
+
+    def test_transcribe_passes_chinese_optimizations(self):
+        recorded_kwargs = {}
+
+        class Segment:
+            text = "优化后的逐字稿"
+
+        class SpyModel:
+            def transcribe(self, _audio, **kwargs):
+                recorded_kwargs.update(kwargs)
+                return [Segment()], None
+
+        def fake_run(cmd, **_kwargs):
+            Path(cmd[-1]).write_bytes(b"wav")
+            return type("R", (), {"returncode": 0})()
+
+        with patch("douyin_favorites_knowledge.local_whisper.check_environment", return_value={"ready": True}), patch(
+            "douyin_favorites_knowledge.local_whisper._download", return_value=(None, "")
+        ), patch(
+            "douyin_favorites_knowledge.local_whisper.subprocess.run", side_effect=fake_run
+        ), patch(
+            "douyin_favorites_knowledge.local_whisper._load_model", return_value=SpyModel()
+        ):
+            result = local_whisper.transcribe(
+                {"play_url": "https://v3-web.douyinvod.com/test.mp4"},
+                {"model": "medium"},
+            )
+
+        self.assertEqual(result["transcript_status"], "success")
+        self.assertEqual(result["transcript"], "优化后的逐字稿")
+        self.assertEqual(recorded_kwargs.get("language"), "zh")
+        self.assertIn("规范简体中文", recorded_kwargs.get("initial_prompt", ""))
+        self.assertFalse(recorded_kwargs.get("condition_on_previous_text"))
+        self.assertTrue(recorded_kwargs.get("vad_filter"))
+
