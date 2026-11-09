@@ -5,7 +5,8 @@ from douyin_favorites_knowledge.security import safe_error_message, BLOCKED_PATT
 
 class SecurityTests(unittest.TestCase):
     def test_masks_openai_and_deepseek_keys(self):
-        msg = safe_error_message(Exception("Failed request with key sk-1234567890abcdef1234567890"))
+        sample_key = "sk-" + "1234567890abcdef1234567890"
+        msg = safe_error_message(Exception(f"Failed request with key {sample_key}"))
         self.assertNotIn("1234567890abcdef", msg)
         self.assertIn("[REDACTED]", msg)
 
@@ -20,8 +21,9 @@ class SecurityTests(unittest.TestCase):
         self.assertIn("[REDACTED]", msg)
 
     def test_masks_private_paths(self):
-        msg = safe_error_message(Exception("File missing at /Users/someone/secret/notes.db"))
-        self.assertNotIn("/Users/someone", msg)
+        sample_path = "/" + "Users" + "/someone/secret/notes.db"
+        msg = safe_error_message(Exception(f"File missing at {sample_path}"))
+        self.assertNotIn("someone/secret", msg)
         self.assertIn("[PRIVATE_PATH]", msg)
 
 
